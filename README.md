@@ -10,6 +10,7 @@ After run any adb command, there will be a adb daemon in backgroud created by ad
 To kill it manually, you need use kill_server  
 
 So far, it support below adb function:
+For any detail usage, please see as doc string
 * start-server
 * kill-server
 * devices
@@ -20,7 +21,7 @@ So far, it support below adb function:
 * pull
 * remount
 * root
-* unroot (not support on Linux)
+* unroot (not support on Ubuntu adb from apt android-tools-adb)
 * reboot
 * reboot-bootloader
 * shell
@@ -28,13 +29,14 @@ So far, it support below adb function:
 * uninstall
 * wait-for-device
 * disable-verity
-* enable-verity (not support on Linux)
+* enable-verity (not support on Ubuntu adb from apt android-tools-adb)
 * logcat
 * shell2file
 
 Example:
 ```Python
     from adb_wrapper import AdbWrapper
-    a = AdbWrapper()
+    a = AdbWrapper() # Auto Find adb in system PATH or Environment
+    b = AdbWrapper(adb_file=r'C:\adb.exe') # User define adb PATH
     a.connect("192.168.1.2")
 ```
