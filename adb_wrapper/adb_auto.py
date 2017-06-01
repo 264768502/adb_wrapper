@@ -14,6 +14,7 @@ class AdbAuto(AdbWrapper):
     file_property_re = p = re.compile(r'([-lspbcdrwx]{10}) *(\S*) *(\S*) *(\d{0,10}) *(\d{4}-\d{1,2}-\d{1,2} \d{1,2}:\d{1,2}) *(.*)')
     netcfg_re = re.compile(r'(.*?) *(UP|DOWN) *(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/\d* *0x\d* (([0-9a-fA-F]{2}[:]){5}[0-9a-fA-F]{2})')
     ifconfig_re = re.compile(r'(.*?)\s*Link encap:(.*?)\s*?(HWaddr ([0-9a-fA-F]{2}[:][0-9a-fA-F]{2}[:][0-9a-fA-F]{2}[:][0-9a-fA-F]{2}[:][0-9a-fA-F]{2}[:][0-9a-fA-F]{2}))?\n\s*(inet addr:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}))?')
+    mac_re = re.compile(r'[0-9a-fA-F]{2}[:][0-9a-fA-F]{2}[:][0-9a-fA-F]{2}[:][0-9a-fA-F]{2}[:][0-9a-fA-F]{2}[:][0-9a-fA-F]{2}')
     # Android L ps command:user  pid   ppid   vsize  rss    wchan  pc     state codes      name
     android_ps_re = re.compile(r'(\w+) +(\d+) *(\d+) +(\d+) +(\d+) *(.*?) +(\w*) +(D|R|S|T|W|X|Z) +(.*)')
     # BusyBox ps command:pid    userid time      command
@@ -33,7 +34,7 @@ class AdbAuto(AdbWrapper):
         '''
         self.logger.info("check_connection: start")
         try:
-            stdout, stderr = self.shell(cmd="exit", device=device)
+            stdout, stderr = self.shell(cmd="exit", device=device, timeout=5)
         except AdbFailException as err:
             res = False
             self.logger.error("adb connect error: ", err.msg)
@@ -60,11 +61,19 @@ class AdbAuto(AdbWrapper):
         Output: Device [SN or IP:Port](str)
         '''
         self.logger.info("connect_auto: start")
+        if device:
+            _device = device
+        else:
+            if self._device:
+                _device = self._device
+            else:
+                self.logger.error("connect_auto: device not define")
+                raise AdbFailException("device not define")
         try:
             # Check Devices List First
             devices = self.devices()
             for exist_device in devices:
-                if device in exist_device:
+                if _device in exist_device:
                     device_name = exist_device  # Because Input Device may be IP only, translate it to SN
                     self.logger.info("connect_auto: Device in adb devices - {}".format(device_name))
                     if devices[device_name] != u'device':
@@ -76,6 +85,8 @@ class AdbAuto(AdbWrapper):
                             self.logger.info("connect_auto: already connected")
                             return device_name
                     break
+            else:
+                self.logger.error("connect_auto: No device in adb devices")
         except AdbFailException:
             pass
         # Device not in Devices List or Connection status False, try do adb connect
@@ -128,7 +139,7 @@ class AdbAuto(AdbWrapper):
         '''
         self.logger.info("is_root: start")
         try:
-            stdout, stderr = self.shell_auto(cmd='id', device=device)
+            stdout, stderr = self.shell_auto(cmd='id', device=device, timeout=5)
         except AdbFailException:
             raise
         if u'uid=0(root)' in stdout:
@@ -226,7 +237,7 @@ class AdbAuto(AdbWrapper):
         self.logger.info("remount_others_auto: start")
         try:
             self.root_auto(device=device)
-            stdout, stderr = self.shell_auto(cmd='mount -o {0},remount {1}'.format(options, target), device=device)
+            stdout, stderr = self.shell_auto(cmd='mount -o {0},remount {1}'.format(options, target), device=device, timeout=30)
         except AdbFailException:
             raise
         if stdout == u'':
@@ -472,12 +483,12 @@ class AdbAuto(AdbWrapper):
                 stderr(str)
         '''
         self.logger.info("get_android_sdk_version: start")
-        stdout = self.shell_auto(cmd='getprop ro.build.version.sdk', device=device)
+        stdout, stderr = self.shell_auto(cmd='getprop ro.build.version.sdk', device=device, timeout=5)
         version_r = re.search(r'^(\d+)$', stdout)
         if version_r:
             version = version_r.group(1)
             self.logger.info("get_android_sdk_version: {}".format(version))
-            return version
+            return int(version)
         else:
             self.logger.error("get_android_sdk_version: Fail to get version")
             self.logger.error("stdout: %r", stdout)
@@ -502,7 +513,7 @@ class AdbAuto(AdbWrapper):
         '''
         self.logger.info("file_property: start")
         self.root_auto(device)
-        stdout, stderr = self.shell_auto(cmd=u'ls -al \'{}\''.format(filepath), device=device)
+        stdout, stderr = self.shell_auto(cmd=u'ls -al \'{}\''.format(filepath), device=device, timeout=5)
         property_list = self.file_property_re.findall(stdout)
         if len(property_list) > 1:
             raise AdbFailException(u"Don't Support Multi files", stdout, stderr)
@@ -541,7 +552,7 @@ class AdbAuto(AdbWrapper):
             self.root_auto(device)
             if self.file_exist(filepath=filepath, device=device):
                 self.logger.info("file_remove: try to delete")
-                self.shell_auto(cmd='rm -rf \'{}\''.format(filepath), device=device)
+                self.shell_auto(cmd='rm -rf \'{}\''.format(filepath), device=device, timeout=60)
                 if not self.file_exist(filepath=filepath, device=device):
                     self.logger.info("file_remove: success")
                     return
@@ -592,7 +603,7 @@ class AdbAuto(AdbWrapper):
         '''
         self.logger.info("file_chmod: start")
         self.root_auto(device)
-        stdout, stderr = self.shell_auto('chmod {0} \'{1}\''.format(permission, filename), device=device)
+        stdout, stderr = self.shell_auto('chmod {0} \'{1}\''.format(permission, filename), device=device, timeout=5)
         if stdout == u'':
             self.logger.info("file_chmod: success")
         else:
@@ -619,7 +630,7 @@ class AdbAuto(AdbWrapper):
             _params = ''
         else:
             _params = params
-        stdout, stderr = self.shell_auto('ln {0} \'{1}\' \'{2}\''.format(_params, target, filename), device=device)
+        stdout, stderr = self.shell_auto('ln {0} \'{1}\' \'{2}\''.format(_params, target, filename), device=device, timeout=5)
         if stdout == u'':
             self.logger.info("file_link: success")
         else:
@@ -636,7 +647,7 @@ class AdbAuto(AdbWrapper):
         '''
         self.logger.info("file_alias: start")
         self.root_auto(device)
-        stdout, stderr = self.shell_auto('alias \'{0}\'=\'{1}\''.format(target, cmd), device=device)
+        stdout, stderr = self.shell_auto('alias \'{0}\'=\'{1}\''.format(target, cmd), device=device, timeout=5)
         if stdout == u'':
             self.logger.info("file_alias: success")
         else:
@@ -652,7 +663,7 @@ class AdbAuto(AdbWrapper):
         '''
         self.logger.info("folder_create: start")
         self.root_auto(device)
-        stdout, stderr = self.shell_auto('mkdir -p \'{}\''.format(folderpath), device=device)
+        stdout, stderr = self.shell_auto('mkdir -p \'{}\''.format(folderpath), device=device, timeout=5)
         if stdout == u'':
             self.logger.info("folder_create: success")
         else:
@@ -668,7 +679,7 @@ class AdbAuto(AdbWrapper):
         '''
         self.logger.info("busybox_exist: start")
         self.root_auto(device)
-        stdout, stderr = self.shell_auto('busybox', device=device)
+        stdout, stderr = self.shell_auto('busybox', device=device, timeout=5)
         if u'Busybox' in stdout:
             self.logger.info("busybox_exist: success")
             res = True
@@ -696,18 +707,25 @@ class AdbAuto(AdbWrapper):
         '''
         self.logger.info("interface_list_get: start")
         self.root_auto(device=device)
-        version = self.android_sdk_version_get(device=device)
-        if version < 23:
-            self.logger.info("interface_list_get: target system Android Version <= 5.0 (SDK 22)")
-            interface_re = self.netcfg_re
-            cmd = 'netcfg'
-            mapping = [0, 2, 3]
-        else:
-            self.logger.info("interface_list_get: target system Android Version >= 6.0 (SDK 23) or other Linux System")
+        try:
+            version = self.android_sdk_version_get(device=device)
+        except AdbFailException:
+            self.logger.info("None-Android platform, may try ifconfig directly")
             interface_re = self.ifconfig_re
-            cmd = 'ifconfig'
-            mapping = [0, 3, 5]
-        stdout, stderr = self.shell_auto(cmd, device=device)
+            cmd = u'ifconfig'
+            mapping = [0, 5, 3]
+        else:
+            if version < 23:
+                self.logger.info("interface_list_get: target system Android Version <= 5.0 (SDK 22)")
+                interface_re = self.netcfg_re
+                cmd = u'netcfg'
+                mapping = [0, 2, 3]
+            else:
+                self.logger.info("interface_list_get: target system Android Version >= 6.0 (SDK 23) or other Linux System")
+                interface_re = self.ifconfig_re
+                cmd = u'ifconfig'
+                mapping = [0, 5, 3]
+        stdout, stderr = self.shell_auto(cmd, device=device, timeout=5)
         interface_list = []
         result_re = interface_re.findall(stdout)
         if len(result_re) == 0:
@@ -716,13 +734,21 @@ class AdbAuto(AdbWrapper):
             interface_set = ()
         else:
             for single in result_re:
-                interface_list.append({u'interface':single[mapping[0]],
-                                       u'ip':single[mapping[1]],
-                                       u'mac':single[mapping[2]]})
-                self.logger.info("Find: %5s|%16s|%s", single[mapping[0]], single[mapping[1]], single[mapping[2]])
-            interface_set = set(interface_list)
+                interface = single[mapping[0]]
+                ip = single[mapping[1]]
+                mac = single[mapping[2]]
+                if cmd == u'ifconfig':
+                    # workaround because unknown reason, orignal re cannot find mac
+                    mac_search = self.mac_re.search(single[1])
+                    if mac_search:
+                        mac = mac_search.group(0)
+                interface_list.append({u'interface':interface,
+                                       u'ip':ip,
+                                       u'mac':mac})
+                self.logger.info("Find: %5s|%16s|%s", interface, mac, ip)
+            # interface_set = set(interface_list)
         self.logger.info("interface_list_get: end")
-        return interface_set
+        return interface_list
 
     def interface_mapping(self, source, target, source_content, device=None):
         '''
@@ -837,7 +863,7 @@ class AdbAuto(AdbWrapper):
             ps_re = self.busybox_ps_re
             cmd = 'busybox ps'
             param_list = [u'pid', u'userid', u'time', u'command']
-        stdout, stderr = self.shell_auto(cmd, device=device)
+        stdout, stderr = self.shell_auto(cmd, device=device, timeout=5)
         result_re = ps_re.findall(stdout)
         if len(result_re) < 1:
             self.logger.error("get_process_list: no process find, abnormal")

@@ -330,6 +330,10 @@ class BaseWrapper(object):
             except subprocess.CalledProcessError:
                 self.logger.error("wmic run error, please check manually in host")
                 return None
+            except WindowsError as err:
+                self.logger.error("wmic run exception: {}".format(err))
+                self.logger.exception("Stack: ")
+                return None
             pattern = re.compile(r'(.*?) *(\d{1,8})')
             for proline in wmilist.split(u'\r\n'):
                 _ = pattern.search(proline)
@@ -434,7 +438,7 @@ class BaseWrapper(object):
                     stderr_str += ''.join(stderr_list)
                     stderr_list = []
                 for nodevice_re in self.nodevice_re_list:
-                    if nodevice_re.search(stderr_str):
+                    if re.search(nodevice_re, stderr_str):
                         with ignored(OSError): p.kill()
                         stop_queue()
                         raise NoDeviceException
