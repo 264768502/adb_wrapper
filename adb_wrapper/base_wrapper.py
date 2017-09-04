@@ -350,7 +350,7 @@ class BaseWrapper(object):
             pids = [pid for pid in os.listdir('/proc') if pid.isdigit()]
             for pid in pids:
                 try:
-                    proc = open(os.path.join('/proc', pid, 'exe'), 'rb').read()
+                    proc = open(os.path.join('/proc', pid, 'exe'), 'rb').read().decode('UTF-8', OUT_ERROR_HANDLING).strip()
                 except IOError:
                     continue
                 if os.path.basename(proc) == self._binaryname:
@@ -389,7 +389,8 @@ class BaseWrapper(object):
         def stop_queue():
             stdout_stop.set()
             stderr_stop.set()
-            p.terminate()
+            with ignored(OSError):
+                p.terminate()
             stdout_t.join()
             stderr_t.join()
         _cmdlist = self._cmdlist_convert(cmdlist)
