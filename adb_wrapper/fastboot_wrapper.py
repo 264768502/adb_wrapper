@@ -10,7 +10,7 @@ from .base_wrapper import SubprocessException
 
 class FastbootFailException(SubprocessException):
     def __init__(self, msg, stdout=None, stderr=None):
-        super(FastbootFailException, self).__init__()
+        super(FastbootFailException, self).__init__(msg, stdout, stderr)
         self.msg, self.stdout, self.stderr = msg, stdout, stderr
 
 class FastbootWrapper(BaseWrapper):
@@ -22,13 +22,14 @@ class FastbootWrapper(BaseWrapper):
     '''
     thirdbinary_p = ()
     _binaryname = u'fastboot'
+    nodevice_re_list = [u'< waiting for ']
     fastboot_fail_re = re.compile(r'FAILED ([\w\W]*)')
     fastboot_error_re = re.compile(r'error: (.*)')
 
     def __init__(self, fastboot_file=None, logger=None):
         super(FastbootWrapper, self).__init__(fastboot_file, logger)
         self._common_fastboot_timeout = 10
-        self.logger.info("FastbootWrapper: init complete")
+        self.logger.info("FastbootWrapper: init complete (default timeout: %s)", self._common_fastboot_timeout)
 
     def _set_binary_version(self):
         '''
@@ -83,7 +84,7 @@ class FastbootWrapper(BaseWrapper):
         Get device list from fastboot device, blocking operation
         Output: Device Dict [Maybe blank dict if no device](dict) or Reason(str)
         Device Dict: {
-                        Device(IP:Port or SN): Status (device/unauthorized/offline),
+                        Device(IP:Port or SN): Status (device/fastboot/unauthorized/offline),
                         ...
         }
         '''
@@ -212,7 +213,9 @@ class FastbootWrapper(BaseWrapper):
         else:
             _target = u''
         self.logger.info("reboot target: %s", target if target else u'normal')
-        cmdlist = ['-s', device, 'reboot {}'.format(_target)]
+        cmdlist = ['-s', device, 'reboot']
+        if target:
+            cmdlist.append(target)
         _timeout = timeout if timeout else self._common_fastboot_timeout
         stdout, stderr = self._command_blocking(cmdlist=cmdlist, timeout=_timeout)
         self._error_stderr_check(stdout, stderr)
@@ -224,6 +227,7 @@ class FastbootWrapper(BaseWrapper):
             self.logger.error("stderr: %r", stderr)
             raise FastbootFailException(UNKNOWNEXCEPTION, stdout, stderr)
 
+    @_device_checkor
     def reboot_bootloader(self, device=None, timeout=None, *args, **kwargs):
         '''
         reboot bootloader by fastboot
@@ -233,6 +237,7 @@ class FastbootWrapper(BaseWrapper):
         '''
         self.reboot(target='bootloader', device=device, timeout=timeout, *args, **kwargs)
 
+    @_device_checkor
     def continue_(self, device=None, timeout=None, *args, **kwargs):
         # Because continue is key word of Python, so use continue_
         '''
@@ -254,6 +259,7 @@ class FastbootWrapper(BaseWrapper):
             self.logger.error("stderr: %r", stderr)
             raise FastbootFailException(UNKNOWNEXCEPTION, stdout, stderr)
 
+    @_device_checkor
     def boot(self, kernel, ramdisk=None, second=None, device=None, timeout=None, *args, **kwargs):
         '''
         boot by fastboot
@@ -289,6 +295,7 @@ class FastbootWrapper(BaseWrapper):
             self.logger.error("stderr: %r", stderr)
             raise FastbootFailException(UNKNOWNEXCEPTION, stdout, stderr)
 
+    @_device_checkor
     def flash(self, partition, filename=None, device=None, timeout=None, *args, **kwargs):
         '''
         boot by fastboot
@@ -314,6 +321,7 @@ class FastbootWrapper(BaseWrapper):
             self.logger.error("stderr: %r", stderr)
             raise FastbootFailException(UNKNOWNEXCEPTION, stdout, stderr)
 
+    @_device_checkor
     def flashraw(self, kernel, ramdisk=None, second=None, device=None, timeout=None, *args, **kwargs):
         '''
         flash:raw by fastboot
@@ -349,14 +357,18 @@ class FastbootWrapper(BaseWrapper):
             self.logger.error("stderr: %r", stderr)
             raise FastbootFailException(UNKNOWNEXCEPTION, stdout, stderr)
 
-    def flashall(self, device=None, timeout=None, *args, **kwargs):
+    @_device_checkor
+    def flashall(self, device=None, timeout=None, reboot=True, *args, **kwargs):
         '''
         flashall by fastboot
         Input:  device [SN(for USB device) / Protocol:IP:Port(for network device)](str) / None(for self._device)
         Output: None
         '''
         self.logger.info("flashall: start")
-        cmdlist = ['-s', device, 'flashall']
+        cmdlist = ['-s', device]
+        if not reboot:
+            cmdlist.append(u'--skip-reboot')
+        cmdlist.append(u'flashall')
         self.logger.info("flashall: device - %s", device)
         _timeout = timeout if timeout else self._common_fastboot_timeout
         stdout, stderr = self._command_blocking(cmdlist=cmdlist, timeout=_timeout)
@@ -369,7 +381,8 @@ class FastbootWrapper(BaseWrapper):
             self.logger.error("stderr: %r", stderr)
             raise FastbootFailException(UNKNOWNEXCEPTION, stdout, stderr)
 
-    def update(self, filename, device=None, timeout=None, *args, **kwargs):
+    @_device_checkor
+    def update(self, filename, device=None, timeout=None, reboot=True, *args, **kwargs):
         '''
         update by fastboot
         Input:  filename (str)
@@ -378,7 +391,10 @@ class FastbootWrapper(BaseWrapper):
         TODO: support slot/-w
         '''
         self.logger.info("update: start")
-        cmdlist = ['-s', device, 'update', filename]
+        cmdlist = ['-s', device]
+        if not reboot:
+            cmdlist.append(u'--skip-reboot')
+        cmdlist.extend(['update', filename])
         self.logger.info("update: device - %s / file - %s", device, filename)
         _timeout = timeout if timeout else self._common_fastboot_timeout
         stdout, stderr = self._command_blocking(cmdlist=cmdlist, timeout=_timeout)
@@ -391,6 +407,7 @@ class FastbootWrapper(BaseWrapper):
             self.logger.error("stderr: %r", stderr)
             raise FastbootFailException(UNKNOWNEXCEPTION, stdout, stderr)
 
+    @_device_checkor
     def set_active(self, slot, device=None, timeout=None, *args, **kwargs):
         '''
         set_active by fastboot
@@ -412,6 +429,7 @@ class FastbootWrapper(BaseWrapper):
             self.logger.error("stderr: %r", stderr)
             raise FastbootFailException(UNKNOWNEXCEPTION, stdout, stderr)
 
+    @_device_checkor
     def oem(self, command, device=None, timeout=None, *args, **kwargs):
         '''
         oem by fastboot
@@ -433,6 +451,7 @@ class FastbootWrapper(BaseWrapper):
             self.logger.error("stderr: %r", stderr)
             raise FastbootFailException(UNKNOWNEXCEPTION, stdout, stderr)
 
+    @_device_checkor
     def _flashing(self, command, device=None, timeout=None, *args, **kwargs):
         '''
         flashing by fastboot
@@ -455,6 +474,7 @@ class FastbootWrapper(BaseWrapper):
             self.logger.error("stderr: %r", stderr)
             raise FastbootFailException(UNKNOWNEXCEPTION, stdout, stderr)
 
+    @_device_checkor
     def flashing_lock(self, device=None, timeout=None, *args, **kwargs):
         '''
         flashing lock by fastboot
@@ -463,6 +483,7 @@ class FastbootWrapper(BaseWrapper):
         '''
         self._flashing(u'lock', device=device, timeout=timeout, *args, **kwargs)
 
+    @_device_checkor
     def flashing_unlock(self, device=None, timeout=None, *args, **kwargs):
         '''
         flashing unlock by fastboot
@@ -471,6 +492,7 @@ class FastbootWrapper(BaseWrapper):
         '''
         self._flashing(u'unlock', device=device, timeout=timeout, *args, **kwargs)
 
+    @_device_checkor
     def flashing_lock_critical(self, device=None, timeout=None, *args, **kwargs):
         '''
         flashing lock_critical by fastboot
@@ -479,6 +501,7 @@ class FastbootWrapper(BaseWrapper):
         '''
         self._flashing(u'lock_critical', device=device, timeout=timeout, *args, **kwargs)
 
+    @_device_checkor
     def flashing_unlock_critical(self, device=None, timeout=None, *args, **kwargs):
         '''
         flashing unlock_critical by fastboot
@@ -487,6 +510,7 @@ class FastbootWrapper(BaseWrapper):
         '''
         self._flashing(u'unlock_critical', device=device, timeout=timeout, *args, **kwargs)
 
+    @_device_checkor
     def flashing_lock_bootloader(self, device=None, timeout=None, *args, **kwargs):
         '''
         flashing lock_bootloader by fastboot
@@ -495,6 +519,7 @@ class FastbootWrapper(BaseWrapper):
         '''
         self._flashing(u'lock_bootloader', device=device, timeout=timeout, *args, **kwargs)
 
+    @_device_checkor
     def flashing_get_unlock_ability(self, device=None, timeout=None, *args, **kwargs):
         '''
         flashing by fastboot
@@ -530,7 +555,26 @@ class FastbootWrapper(BaseWrapper):
         '''
         raise NotImplementedError
 
-# TODO: -w (dropped, please use erase)
-#       -u (for format)
+    @_device_checkor
+    def wipe(self, device=None, timeout=None, *args, **kwargs):
+        '''
+        -w function in fastboot for wipe userdata/cache
+        Input:  device [SN(for USB device) / Protocol:IP:Port(for network device)](str) / None(for self._device)
+        Output: None
+        '''
+        self.logger.info("wipe: start")
+        cmdlist = ['-s', device, '-w']
+        self.logger.info("wipe: device - %s", device)
+        _timeout = timeout if timeout else self._common_fastboot_timeout
+        stdout, stderr = self._command_blocking(cmdlist=cmdlist, timeout=_timeout)
+        self._error_stderr_check(stdout, stderr)
+        if u'OKAY' in stderr and 'finished' in stderr:
+            self.logger.info("wipe: success")
+        else:
+            self.logger.error("wipe unknown error")
+            self.logger.error("stdout: %r", stdout)
+            self.logger.error("stderr: %r", stderr)
+            raise FastbootFailException(UNKNOWNEXCEPTION, stdout, stderr)
+
+# TODO: -u (for format)
 #       --skip-secondary (flashall/update)
-#       --skip_rebot (flashall/update)
