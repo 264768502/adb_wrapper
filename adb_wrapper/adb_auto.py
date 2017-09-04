@@ -7,7 +7,7 @@ from .adb_wrapper import ADB_SERVER_PORT
 from .adb_wrapper import FILE_TRANSFORM_TIMEOUT
 from .adb_wrapper import BUGREPORT_TIMEOUT
 from .adb_wrapper import NOFILEORFOLDER, PERMISSION_DENY, READONLY, SHELL_FAILED
-from .adb_wrapper import AdbFailException
+from .adb_wrapper import AdbFailException, AdbConnectFail
 
 class AdbAuto(AdbWrapper):
 
@@ -100,7 +100,7 @@ class AdbAuto(AdbWrapper):
                 else:
                     self.logger.error("connect_auto: check connect Fail")
                 break
-            except AdbFailException:
+            except (AdbFailException, AdbConnectFail):
                 if num == retry_times - 1:
                     self.logger.info("connect_auto: connect keep fail in {} times".format(retry_times))
                     raise
