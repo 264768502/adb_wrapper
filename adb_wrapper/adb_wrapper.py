@@ -805,6 +805,7 @@ class AdbWrapper(BaseWrapper):
         else:
             self.logger.warning("reboot: always treat as success")
 
+    @_device_checkor
     def reboot_bootloader(self, device=None):
         return self.reboot(mode=u'bootloader', device=device)
 
