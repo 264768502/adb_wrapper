@@ -192,9 +192,13 @@ class BaseWrapper(object):
         if logger:
             self.logger = logger
         else:
-            self.logger = logging
-            self.logger.basicConfig(format='%(asctime)s %(levelname)-8s %(message)s',
-                                    level=logging.INFO)
+            self.logger = logging.getLogger('adb')
+            if not self.logger.handlers:
+                logging.getLogger().setLevel(logging.DEBUG)
+                stream_hdl = logging.StreamHandler()
+                stream_hdl.setLevel(logging.INFO)
+                stream_hdl.setFormatter(logging.Formatter('%(asctime)s %(levelname)-8s [%(funcName)s:%(lineno)d] %(message)s'))
+                self.logger.addHandler(stream_hdl)
         self.logger.info("%s: init start", self.__class__)
         self.logger.info("Python: %s", sys.version)
         self.logger.info("Sys Encoding: %s", locale.getpreferredencoding())
@@ -346,7 +350,7 @@ class BaseWrapper(object):
                     if os.path.basename(proc) == thirdbinary_p:
                         self.logger.critical("Find 3rd %s, please uninstall it to prevent unexpected error", self._binaryname)
                         self.logger.critical("3rd %s: %s", self._binaryname, proc)
-        elif sys.platform == 'linux2':
+        elif sys.platform in ('linux2', 'linux'):
             pids = [pid for pid in os.listdir('/proc') if pid.isdigit()]
             for pid in pids:
                 try:

@@ -7,6 +7,7 @@ from .base_wrapper import BaseWrapper
 from .base_wrapper import _device_checkor
 from .base_wrapper import UNKNOWNEXCEPTION
 from .base_wrapper import SubprocessException
+from .base_wrapper import NoDeviceException
 
 class FastbootFailException(SubprocessException):
     def __init__(self, msg, stdout=None, stderr=None):
@@ -57,7 +58,7 @@ class FastbootWrapper(BaseWrapper):
             self.logger.error("error: %s", reason)
             raise FastbootFailException(reason, stdout, stderr)
         if re.search(self.fastboot_error_re, stderr):
-            reason = re.search(self.fastboot_fail_re, stderr).group(1).strip()
+            reason = re.search(self.fastboot_error_re, stderr).group(1).strip()
             self.logger.error("error: %s", reason)
             raise FastbootFailException(reason, stdout, stderr)
 
@@ -109,6 +110,22 @@ class FastbootWrapper(BaseWrapper):
             devices_dict.update({device[0]: device[1]})
         return devices_dict
 
+    def _run_fb_cmd(self, cmdlist, timeout):
+        '''
+        Common method to run fastboot cmd (except devices)
+        Input: cmdlist (list)
+               timeout (int)
+        Output: stdout, stderr
+        May raise FastbootFailException
+        '''
+        try:
+            stdout, stderr = self._command_blocking(cmdlist=cmdlist, timeout=timeout)
+        except NoDeviceException:
+            self.logger.error("No Device to detected")
+            raise FastbootFailException(u"No Device to detected")
+        self._error_stderr_check(stdout, stderr)
+        return stdout, stderr
+
     @_device_checkor
     def getvar(self, variable, device=None, timeout=None, *args, **kwargs):
         '''
@@ -123,8 +140,7 @@ class FastbootWrapper(BaseWrapper):
         self.logger.info("getvar: device - %s / variable - %s", device, variable)
         cmdlist = ['-s', device, 'getvar', variable]
         _timeout = timeout if timeout else self._common_fastboot_timeout
-        stdout, stderr = self._command_blocking(cmdlist=cmdlist, timeout=_timeout)
-        self._error_stderr_check(stdout, stderr)
+        stdout, stderr = self._run_fb_cmd(cmdlist, _timeout)
         if variable == u'all':
             va_list = re.findall(r'\(bootloader\) (\w)+: (.+)', stderr)
             va_dict = {key:value for key, value in va_list}
@@ -152,8 +168,7 @@ class FastbootWrapper(BaseWrapper):
         self.logger.info("erase: device - %s / partition - %s", device, partition)
         cmdlist = ['-s', device, 'erase', partition]
         _timeout = timeout if timeout else self._common_fastboot_timeout
-        stdout, stderr = self._command_blocking(cmdlist=cmdlist, timeout=_timeout)
-        self._error_stderr_check(stdout, stderr)
+        stdout, stderr = self._run_fb_cmd(cmdlist, _timeout)
         if u'OKAY ' in stderr:
             self.logger.error("erase success")
         else:
@@ -184,8 +199,7 @@ class FastbootWrapper(BaseWrapper):
             _size = u''
         cmdlist = ['-s', device, 'format:{}:{}'.format(_fs_type, _size), partition]
         _timeout = timeout if timeout else self._common_fastboot_timeout
-        stdout, stderr = self._command_blocking(cmdlist=cmdlist, timeout=_timeout)
-        self._error_stderr_check(stdout, stderr)
+        stdout, stderr = self._run_fb_cmd(cmdlist, _timeout)
         if u'Formatting is not supported for file system with type' in stderr:
             reason = u'Not supported fs type'
             self.logger.error("format error: %s", reason)
@@ -217,8 +231,7 @@ class FastbootWrapper(BaseWrapper):
         if target:
             cmdlist.append(target)
         _timeout = timeout if timeout else self._common_fastboot_timeout
-        stdout, stderr = self._command_blocking(cmdlist=cmdlist, timeout=_timeout)
-        self._error_stderr_check(stdout, stderr)
+        stdout, stderr = self._run_fb_cmd(cmdlist, _timeout)
         if u'rebooting' in stderr and u'finished' in stderr:
             self.logger.info("reboot: success")
         else:
@@ -249,8 +262,7 @@ class FastbootWrapper(BaseWrapper):
         self.logger.info("continue: device - %s", device)
         cmdlist = ['-s', device, 'continue']
         _timeout = timeout if timeout else self._common_fastboot_timeout
-        stdout, stderr = self._command_blocking(cmdlist=cmdlist, timeout=_timeout)
-        self._error_stderr_check(stdout, stderr)
+        stdout, stderr = self._run_fb_cmd(cmdlist, _timeout)
         if u'boot' in stderr and u'finished' in stderr:
             self.logger.info("continue: success")
         else:
@@ -285,8 +297,7 @@ class FastbootWrapper(BaseWrapper):
                 cmdlist.append(second)
             break
         _timeout = timeout if timeout else self._common_fastboot_timeout
-        stdout, stderr = self._command_blocking(cmdlist=cmdlist, timeout=_timeout)
-        self._error_stderr_check(stdout, stderr)
+        stdout, stderr = self._run_fb_cmd(cmdlist, _timeout)
         if u'booting' in stderr and u'OKAY' in stderr and u'finished' in stderr:
             self.logger.info("boot: success")
         else:
@@ -305,14 +316,16 @@ class FastbootWrapper(BaseWrapper):
         Output: None
         '''
         self.logger.info("flash: start")
-        cmdlist = ['-s', device, 'flash', partition]
+        cmdlist = ['-s', device]
+        for key, value in kwargs.items():
+            cmdlist.extend([key, value])
+        cmdlist.extend(['flash', partition])
         self.logger.info("flash: device - %s", device)
         if filename:
             self.logger.info("flash: filename - %s", filename)
             cmdlist.append(filename)
         _timeout = timeout if timeout else self._common_fastboot_timeout
-        stdout, stderr = self._command_blocking(cmdlist=cmdlist, timeout=_timeout)
-        self._error_stderr_check(stdout, stderr)
+        stdout, stderr = self._run_fb_cmd(cmdlist, _timeout)
         if u'sending' in stderr and u'writing' in stderr and u'OKAY' in stderr:
             self.logger.info("flash: success")
         else:
@@ -347,8 +360,7 @@ class FastbootWrapper(BaseWrapper):
                 cmdlist.append(second)
             break
         _timeout = timeout if timeout else self._common_fastboot_timeout
-        stdout, stderr = self._command_blocking(cmdlist=cmdlist, timeout=_timeout)
-        self._error_stderr_check(stdout, stderr)
+        stdout, stderr = self._run_fb_cmd(cmdlist, _timeout)
         if u'booting' in stderr and u'OKAY' in stderr and u'finished' in stderr:
             self.logger.info("flashraw: success")
         else:
@@ -371,8 +383,7 @@ class FastbootWrapper(BaseWrapper):
         cmdlist.append(u'flashall')
         self.logger.info("flashall: device - %s", device)
         _timeout = timeout if timeout else self._common_fastboot_timeout
-        stdout, stderr = self._command_blocking(cmdlist=cmdlist, timeout=_timeout)
-        self._error_stderr_check(stdout, stderr)
+        stdout, stderr = self._run_fb_cmd(cmdlist, _timeout)
         if u'OKAY' in stderr and 'finished' in stderr:
             self.logger.info("flashall: success")
         else:
@@ -397,8 +408,7 @@ class FastbootWrapper(BaseWrapper):
         cmdlist.extend(['update', filename])
         self.logger.info("update: device - %s / file - %s", device, filename)
         _timeout = timeout if timeout else self._common_fastboot_timeout
-        stdout, stderr = self._command_blocking(cmdlist=cmdlist, timeout=_timeout)
-        self._error_stderr_check(stdout, stderr)
+        stdout, stderr = self._run_fb_cmd(cmdlist, _timeout)
         if u'OKAY' in stderr and 'finished' in stderr:
             self.logger.info("update: success")
         else:
@@ -419,8 +429,7 @@ class FastbootWrapper(BaseWrapper):
         cmdlist = ['-s', device, 'set_active', slot]
         self.logger.info("set_active: device - %s / slot - %s", device, slot)
         _timeout = timeout if timeout else self._common_fastboot_timeout
-        stdout, stderr = self._command_blocking(cmdlist=cmdlist, timeout=_timeout)
-        self._error_stderr_check(stdout, stderr)
+        stdout, stderr = self._run_fb_cmd(cmdlist, _timeout)
         if u'OKAY' in stderr and 'finished' in stderr:
             self.logger.info("set_active: success")
         else:
@@ -441,8 +450,7 @@ class FastbootWrapper(BaseWrapper):
         cmdlist = ['-s', device, 'oem', command]
         self.logger.info("oem: device - %s / command - %s", device, command)
         _timeout = timeout if timeout else self._common_fastboot_timeout
-        stdout, stderr = self._command_blocking(cmdlist=cmdlist, timeout=_timeout)
-        self._error_stderr_check(stdout, stderr)
+        stdout, stderr = self._run_fb_cmd(cmdlist, _timeout)
         if u'OKAY' in stderr and 'finished' in stderr:
             self.logger.info("oem: success")
         else:
@@ -464,8 +472,7 @@ class FastbootWrapper(BaseWrapper):
         cmdlist = ['-s', device, 'flashing', command]
         self.logger.info("%s: device - %s", caller, device)
         _timeout = timeout if timeout else self._common_fastboot_timeout
-        stdout, stderr = self._command_blocking(cmdlist=cmdlist, timeout=_timeout)
-        self._error_stderr_check(stdout, stderr)
+        stdout, stderr = self._run_fb_cmd(cmdlist, _timeout)
         if u'OKAY' in stderr and 'finished' in stderr:
             self.logger.info("%s: success", caller)
         else:
@@ -532,8 +539,7 @@ class FastbootWrapper(BaseWrapper):
         cmdlist = ['-s', device, 'flashing', 'get_unlock_ability']
         self.logger.info("%s: device - %s", caller, device)
         _timeout = timeout if timeout else self._common_fastboot_timeout
-        stdout, stderr = self._command_blocking(cmdlist=cmdlist, timeout=_timeout)
-        self._error_stderr_check(stdout, stderr)
+        stdout, stderr = self._run_fb_cmd(cmdlist, _timeout)
         abi_re = re.compile(r'get_unlock_ability: (\d)')
         if u'OKAY' in stderr and 'finished' in stderr and abi_re.search(stderr):
             abi = abi_re.search(stderr).group(1)
@@ -566,8 +572,7 @@ class FastbootWrapper(BaseWrapper):
         cmdlist = ['-s', device, '-w']
         self.logger.info("wipe: device - %s", device)
         _timeout = timeout if timeout else self._common_fastboot_timeout
-        stdout, stderr = self._command_blocking(cmdlist=cmdlist, timeout=_timeout)
-        self._error_stderr_check(stdout, stderr)
+        stdout, stderr = self._run_fb_cmd(cmdlist, _timeout)
         if u'OKAY' in stderr and 'finished' in stderr:
             self.logger.info("wipe: success")
         else:

@@ -8,17 +8,38 @@ from .adb_wrapper import FILE_TRANSFORM_TIMEOUT
 from .adb_wrapper import BUGREPORT_TIMEOUT
 from .adb_wrapper import NOFILEORFOLDER, PERMISSION_DENY, READONLY, SHELL_FAILED
 from .adb_wrapper import AdbFailException, AdbConnectFail
+from .intent import Intent
 
 class AdbAuto(AdbWrapper):
+    '''Here is a little smart AdbWrapper'''
+    file_property_nose_re = re.compile((r'(?P<permission>[-lspbcdrwx\.]{10}) *'
+                                        r'(?P<linknum>\d+) *'
+                                        r'(?P<group>\S*) *(?P<owner>\S*) *'
+                                        r'(?P<filesize>\d{0,10}) *'
+                                        r'(?P<datetime>\d{4}-\d{1,2}-\d{1,2} \d{1,2}:\d{1,2}) *'
+                                        r'(?P<filename>.*)'))
+    file_property_se_re = re.compile((r'(?P<permission>[-lspbcdrwx\.]{10}) *'
+                                      r'(?P<linknum>\d+) *'
+                                      r'(?P<group>\S*) *(?P<owner>\S*) *'
+                                      r'(?P<filesize>\d{0,10}) *'
+                                      r'(?P<seprop>\S*) *'
+                                      r'(?P<datetime>\d{4}-\d{1,2}-\d{1,2} \d{1,2}:\d{1,2}) *'
+                                      r'(?P<filename>.*)'))
+    netcfg_re = re.compile((r'(?P<interfacename>[\w\-]+) *'
+                            r'(?P<ip>\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/\d* *'
+                            r'0x\d* '
+                            r'(?P<mac>([0-9a-fA-F]{2}[:]){5}[0-9a-fA-F]{2})'))
+    ifconfig_re = re.compile((r'(?P<interfacename>[\w\-]+)\s*Link encap:(?P<linkencap>\w+)\s*'
+                              r'(Loopback|\s*?HWaddr (?P<mac>[0-9a-fA-F]{2}[:][0-9a-fA-F]{2}[:][0-9a-fA-F]{2}[:][0-9a-fA-F]{2}[:][0-9a-fA-F]{2}[:][0-9a-fA-F]{2}))\s*'
+                              r'(inet addr:(?P<ip>\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}))?'))
 
-    file_property_re = p = re.compile(r'([-lspbcdrwx]{10}) *(\S*) *(\S*) *(\d{0,10}) *(\d{4}-\d{1,2}-\d{1,2} \d{1,2}:\d{1,2}) *(.*)')
-    netcfg_re = re.compile(r'(.*?) *(UP|DOWN) *(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/\d* *0x\d* (([0-9a-fA-F]{2}[:]){5}[0-9a-fA-F]{2})')
-    ifconfig_re = re.compile(r'(.*?)\s*Link encap:(.*?)\s*?(HWaddr ([0-9a-fA-F]{2}[:][0-9a-fA-F]{2}[:][0-9a-fA-F]{2}[:][0-9a-fA-F]{2}[:][0-9a-fA-F]{2}[:][0-9a-fA-F]{2}))?\n\s*(inet addr:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}))?')
     mac_re = re.compile(r'[0-9a-fA-F]{2}[:][0-9a-fA-F]{2}[:][0-9a-fA-F]{2}[:][0-9a-fA-F]{2}[:][0-9a-fA-F]{2}[:][0-9a-fA-F]{2}')
     # Android L ps command:user  pid   ppid   vsize  rss    wchan  pc     state codes      name
     android_ps_re = re.compile(r'(\w+) +(\d+) *(\d+) +(\d+) +(\d+) *(.*?) +(\w*) +(D|R|S|T|W|X|Z) +(.*)')
     # BusyBox ps command:pid    userid time      command
     busybox_ps_re = re.compile(r'(\d+) +(\d+) +(\d+:\d+) +(.*)')
+    # mount command:
+    mount_re = mount_re = re.compile(r'(?P<device>.*?) on (?P<mount_point>/.*?) type (?P<type>.*?) \((?P<options>.*?)\)')
 
     def __init__(self, adb_file=None, logger=None, adb_server_port=ADB_SERVER_PORT):
         super(AdbAuto, self).__init__(adb_file, logger)
@@ -37,7 +58,7 @@ class AdbAuto(AdbWrapper):
             stdout, stderr = self.shell(cmd="exit", device=device, timeout=5)
         except AdbFailException as err:
             res = False
-            self.logger.error("adb connect error: ", err.msg)
+            self.logger.error("adb connect error: %s", err.msg)
         else:
             if stdout != u"" or stderr != u"":
                 res = False
@@ -75,9 +96,9 @@ class AdbAuto(AdbWrapper):
             for exist_device in devices:
                 if _device in exist_device:
                     device_name = exist_device  # Because Input Device may be IP only, translate it to SN
-                    self.logger.info("connect_auto: Device in adb devices - {}".format(device_name))
+                    self.logger.info("connect_auto: Device in adb devices - %s", device_name)
                     if devices[device_name] != u'device':
-                        self.logger.error("connect_auto: Device status - {}".format(devices[device_name]))
+                        self.logger.error("connect_auto: Device status - %s", devices[device_name])
                         self.logger.error("connect_auto: Try to disconnect it")
                         self.disconnect(device_name)
                     else:
@@ -99,11 +120,13 @@ class AdbAuto(AdbWrapper):
                     return device_name
                 else:
                     self.logger.error("connect_auto: check connect Fail")
-                break
+                continue
             except (AdbFailException, AdbConnectFail):
                 if num == retry_times - 1:
-                    self.logger.info("connect_auto: connect keep fail in {} times".format(retry_times))
+                    self.logger.error("connect_auto: connect keep fail in %s times", retry_times)
                     raise
+        self.logger.error("connect_auto: connect success but always check connection fail")
+        raise AdbConnectFail
 
     def disconnect_auto(self, device=None):
         '''
@@ -126,7 +149,7 @@ class AdbAuto(AdbWrapper):
             devicename = self.connect_auto(device=device)
             stdout, stderr = self.shell(cmd=cmd, device=devicename, timeout=timeout)
             self.logger.info("shell_auto: complete")
-        except AdbFailException:
+        except (AdbFailException, AdbConnectFail):
             raise
         return stdout, stderr
 
@@ -143,10 +166,10 @@ class AdbAuto(AdbWrapper):
         except AdbFailException:
             raise
         if u'uid=0(root)' in stdout:
-            self.logger.info("is_root: Now adb {} is root".format(device))
+            self.logger.info("is_root: Now adb %s is root", device)
             return True
         elif u'uid=' in stdout:
-            self.logger.info("is_root: Now adb {0} is not root - {1}".format(device, stdout))
+            self.logger.info("is_root: Now adb %s is not root - %r", device, stdout)
             return False
         else:
             self.logger.error("is_root: Fail to get response from shell id")
@@ -246,6 +269,88 @@ class AdbAuto(AdbWrapper):
             self.logger.error("remount_others_auto: fail in shell")
             error = stdout
             raise AdbFailException(error, stdout, stderr)
+
+    def mount2local(self, mount_device, dir, vfstype=None, mount_src=None, device=None, *options):
+        '''
+        Use adb shell mount to do remount target parition with params
+        Input: device [SN(for USB device) / IP:Port(for network device)](str) / None(for self._device)]
+               dir [parition like dir='/mnt/media/usb' or dir='/mnt/media/nfs'](str)
+               mount_device[ mount_device='/dev/sdb' or mount_device='10.70.152.168:/home/xinxin/nfs' or
+                             mount_device='//10.70.152.168/home/xinxin/nfs']
+               mount_src[ mount_src='busybox' or mount_src='busybox.suid']
+               options [like '-o' 'nolock' .. ](str)
+        Output: Result(bool)
+                Reason(str)
+                stdout[from adb command](str)
+                stderr(str)
+        '''
+        lst = []
+        if mount_src:
+            lst.append(mount_src)
+        lst.append('mount')
+        if vfstype:
+            lst.append('-t')
+            lst.append(vfstype)
+        if options:
+            lst.extend(options)
+        lst.append(mount_device)
+        lst.append(dir)
+        cmdlst = ' '.join(lst)
+        self.logger.info("cmdlst:{}".format(cmdlst))
+        try:
+            stdout, stderr = self.shell_auto(cmdlst, device=device, timeout=30)
+        except AdbFailException:
+            raise
+        try:
+            res = self.get_partition_status()
+        except AdbFailException:
+            raise
+        if res:
+            for mount_prop in res:
+                if mount_prop['device'] == mount_device and mount_prop['mount_point'] == dir:
+                    break
+            else:
+                raise AdbFailException('mount fail', stdout, stderr)
+
+        else:
+            raise AdbFailException('mount fail', stdout, stderr)
+
+    def mount2local_auto(self, mount_device, dir, vfstype=None, mount_src=None, device=None, *options):
+        stdout, stderr = self.shell_auto(cmd=u'ls -l \'{}\''.format(dir), device=device, timeout=5)
+        if u'No such file or directory' in stdout:
+            try:
+                self.shell_auto(cmd='mkdir {}'.format(dir), device=device, timeout=5)
+            except AdbFailException:
+                raise
+        if '/dev' in mount_device:
+            vfstype_ = None
+        elif ':' in mount_device:
+            vfstype_ = 'nfs'
+        elif mount_device.startswith('//'):
+            vfstype_ = 'smbfs'
+
+        if vfstype != vfstype_ and vfstype != 'None':
+            self.logger.warning("I expect vfstype is {},but it is {}".format(vfstype_, vfstype))
+
+        version = self.android_sdk_version_get()
+        if version:
+            if not vfstype:
+                mount_src_ = None
+            else:
+                mount_src_ = 'busybox'
+        else:
+            if not vfstype:
+                mount_src_ = None
+            else:
+                stdout, stderr = self.shell_auto(cmd="which busybox.suid", device=device, timeout=10)
+                if stdout:
+                    mount_src_ = 'busybox.suid'
+                else:
+                    mount_src_ = None
+        if mount_src != mount_src_:
+            self.logger.warning("I expect mount_src is {},but it is {}".format(mount_src_, mount_src))
+
+        self.mount2local(mount_device, dir, vfstype, mount_src, device, *options)
 
     def push_auto(self, src, dst, device=None, timeout=FILE_TRANSFORM_TIMEOUT):
         '''
@@ -473,6 +578,20 @@ class AdbAuto(AdbWrapper):
             self.logger.error("shell2file_auto: fail")
         return res, result
 
+    def android_getprop(self, key, device=None):
+        '''
+        Use adb shell getprop
+        Input: device [SN(for USB device) / IP:Port(for network device)](str) / None(for self._device)]
+               key(str)
+        Output: stdout[from adb command](str)
+        '''
+        self.logger.info("getprop: start - %s", key)
+        stdout, stderr = self.shell_auto(cmd='getprop {}'.format(key), device=device, timeout=5)
+        if not stderr:
+            self.logger.warning("stderr: %r", stderr)
+        self.logger.info("getprop - %s: %r", key, stdout)
+        return stdout
+
     def android_sdk_version_get(self, device=None):
         '''
         Use adb shell getprop ro.build.version.sdk
@@ -487,16 +606,59 @@ class AdbAuto(AdbWrapper):
         version_r = re.search(r'^(\d+)$', stdout)
         if version_r:
             version = version_r.group(1)
-            self.logger.info("get_android_sdk_version: {}".format(version))
+            self.logger.info("get_android_sdk_version: %s", version)
             return int(version)
         else:
             self.logger.error("get_android_sdk_version: Fail to get version")
             self.logger.error("stdout: %r", stdout)
+            self.logger.error("stderr: %r", stderr)
+            raise AdbFailException(SHELL_FAILED, stdout, u'')
+
+    def pm_list_packages(self, device=None):
+        '''
+        Do pm list packages
+        Input: device [SN(for USB device) / IP:Port(for network device)](str) / None(for self._device)]
+        Output: Result(bool)
+                set(packages)[If result==True](int) or Reason(str)
+                stdout[from adb command](str)
+                stderr(str)
+        '''
+        self.logger.info("pm_list_packages: start")
+        self.connect_auto(device)
+        cmd = u'pm list packages'
+        stdout, stderr = self.shell_auto(cmd=cmd, device=device, timeout=30)
+        packages = set(re.findall(r'package:([\w\.]*)', stdout))
+        if packages:
+            return True, packages, stdout, stderr
+        else:
+            self.logger.error("pm_list_packages: Fail to get packages")
+            self.logger.error("stdout: %r", stdout)
+            self.logger.error("stderr: %r", stderr)
+            raise AdbFailException(SHELL_FAILED, stdout, u'')
+
+    def pm_disable(self, activity, device=None):
+        '''
+        Do pm disable for activity
+        Input:  activity
+                device [SN(for USB device) / IP:Port(for network device)](str) / None(for self._device)]
+        Output: None
+        '''
+        self.logger.info("pm_disable: start")
+        self.connect_auto(device)
+        cmd = u'pm disable {}'.format(activity)
+        stdout, stderr = self.shell_auto(cmd=cmd, device=device, timeout=30)
+
+        if u'new state: disabled' in stdout:
+            pass
+        else:
+            self.logger.error("pm_disable: Fail to run")
+            self.logger.error("stdout: %r", stdout)
+            self.logger.error("stderr: %r", stderr)
             raise AdbFailException(SHELL_FAILED, stdout, u'')
 
     def file_property(self, filepath, timeformat='%Y-%m-%d %H:%M', device=None):
         '''
-        Get target filepath property by 'ls -al'
+        Get target filepath property by 'ls -al' or 'ls -alZ'
         For folder, filepath cannot endwith /
         Input: device [SN(for USB device) / IP:Port(for network device)](str) / None(for self._device)]
                filepath [sugguest to Absolute path, folder path is not support](str)
@@ -507,31 +669,55 @@ class AdbAuto(AdbWrapper):
                 stderr(str)
         file_property_dict: {'permission': 'drwxr-xr-x',
                              'owner':'root', 'group':'root',
-                             'size':'5', 'datetime': datetime,
+                             'filesize':'5', 'datetime': datetime,
                              'filename': '', linkfile:'',
+                             # below for SELinux
+                             'user': user, u'role': role,
+                             'type': setype, u'level': level,
                              }
         '''
         self.logger.info("file_property: start")
         self.root_auto(device)
-        stdout, stderr = self.shell_auto(cmd=u'ls -al \'{}\''.format(filepath), device=device, timeout=5)
-        property_list = self.file_property_re.findall(stdout)
-        if len(property_list) > 1:
+        try:
+            if self.android_sdk_version_get(device=device) > 22:
+                cmd = u'ls -alZ \'{}\''.format(filepath)
+                file_property_re = self.file_property_se_re
+            else:
+                cmd = u'ls -al \'{}\''.format(filepath)
+                file_property_re = self.file_property_nose_re
+        except AdbFailException:
+            cmd = u'ls -al \'{}\''.format(filepath)
+        stdout, stderr = self.shell_auto(cmd=cmd, device=device, timeout=5)
+        property_num = len(file_property_re.findall(stdout))
+        if property_num > 1:
             raise AdbFailException(u"Don't Support Multi files", stdout, stderr)
-        elif len(property_list) == 0:
+        elif property_num == 0:
             raise AdbFailException(NOFILEORFOLDER, stdout, stderr)
-        permission, owner, group, size, modifytime, filename = property_list[0]
-        modifytime = datetime.strptime(modifytime, timeformat)
-        if ' -> ' in filename:
-            filename, linkfile = filename.split(' -> ', 1)
-        else:
-            linkfile = None
-        return {'permission': permission, 'owner': owner, 'group': group,
-                'size': size, 'datetime': modifytime,
-                'filename': filename, 'linkfile': linkfile,}
+        property_group = file_property_re.search(stdout)
+        ret = property_group.groupdict()
+        ret.update({u'datetime': datetime.strptime(ret.get(u'datetime'), timeformat)})
+        if u' -> ' in ret.get(u'filename'):
+            filename, linkfile = ret.get(u'filename').split(u' -> ', 1)
+            ret.update({
+                u'filename': filename,
+                u'linkfile': linkfile,
+            })
+        if ret.get('seprop'):
+            user, role, setype, level = ret.get(u'seprop').split(u':', 4)
+            ret.update({
+                u'user': user, u'role': role,
+                u'type': setype, u'level': level,
+            })
+        return ret
 
     def file_exist(self, filepath, device=None):
-        res = self.file_property(filepath=filepath, device=device)
-        if res:
+        '''
+        Check file exist or not by ls
+        Input: device [SN(for USB device) / IP:Port(for network device)](str) / None(for self._device)]
+               filepath [sugguest to Absolute path](str)
+        Output: bool
+        '''
+        if self.file_property(filepath=filepath, device=device):
             return True
         else:
             return False
@@ -585,7 +771,7 @@ class AdbAuto(AdbWrapper):
             raise AdbFailException(NOFILEORFOLDER, stdout, stderr)
         else:
             for filepath in filelist:
-                self.logger.info("file_find: {}".format(filepath))
+                self.logger.info("file_find: %s", filepath)
             return filelist
 
     def file_chmod(self, filename, permission, device=None):
@@ -607,7 +793,7 @@ class AdbAuto(AdbWrapper):
         if stdout == u'':
             self.logger.info("file_chmod: success")
         else:
-            self.logger.info("file_chmod: fail - {}".format(stdout))
+            self.logger.info("file_chmod: fail - %s", stdout)
             raise AdbFailException(SHELL_FAILED, stdout, stderr)
 
     def file_link(self, target, filename, params=None, device=None):
@@ -634,7 +820,7 @@ class AdbAuto(AdbWrapper):
         if stdout == u'':
             self.logger.info("file_link: success")
         else:
-            self.logger.info("file_link: {}".format(stdout))
+            self.logger.info("file_link: %s", stdout)
             raise AdbFailException(SHELL_FAILED, stdout, stderr)
 
     def file_alias(self, cmd, target, device=None):
@@ -651,7 +837,7 @@ class AdbAuto(AdbWrapper):
         if stdout == u'':
             self.logger.info("file_alias: success")
         else:
-            self.logger.info("file_alias: {}".format(stdout))
+            self.logger.info("file_alias: %s", stdout)
             raise AdbFailException(SHELL_FAILED, stdout, stderr)
 
     def folder_create(self, folderpath, device=None):
@@ -667,7 +853,7 @@ class AdbAuto(AdbWrapper):
         if stdout == u'':
             self.logger.info("folder_create: success")
         else:
-            self.logger.info("folder_create: {}".format(stdout))
+            self.logger.info("folder_create: %r", stdout)
             raise AdbFailException(SHELL_FAILED, stdout, stderr)
 
     def busybox_exist(self, device=None):
@@ -687,7 +873,7 @@ class AdbAuto(AdbWrapper):
             self.logger.info("busybox_exist: fail to found")
             res = False
         else:
-            self.logger.info("busybox_exist: {}".format(stdout))
+            self.logger.info("busybox_exist: %r", stdout)
             raise AdbFailException(SHELL_FAILED, stdout, stderr)
         return res
 
@@ -713,42 +899,34 @@ class AdbAuto(AdbWrapper):
             self.logger.info("None-Android platform, may try ifconfig directly")
             interface_re = self.ifconfig_re
             cmd = u'ifconfig'
-            mapping = [0, 5, 3]
         else:
             if version < 23:
                 self.logger.info("interface_list_get: target system Android Version <= 5.0 (SDK 22)")
                 interface_re = self.netcfg_re
                 cmd = u'netcfg'
-                mapping = [0, 2, 3]
             else:
                 self.logger.info("interface_list_get: target system Android Version >= 6.0 (SDK 23) or other Linux System")
                 interface_re = self.ifconfig_re
                 cmd = u'ifconfig'
-                mapping = [0, 5, 3]
         stdout, stderr = self.shell_auto(cmd, device=device, timeout=5)
-        interface_list = []
-        result_re = interface_re.findall(stdout)
-        if len(result_re) == 0:
+        interfaces_list = []
+        if not interface_re.search(stdout):
             self.logger.warning("Fail to find any network interface")
             self.logger.warning("stdout: %r", stdout)
-            interface_set = ()
+            self.logger.warning("stderr: %r", stderr)
         else:
-            for single in result_re:
-                interface = single[mapping[0]]
-                ip = single[mapping[1]]
-                mac = single[mapping[2]]
-                if cmd == u'ifconfig':
-                    # workaround because unknown reason, orignal re cannot find mac
-                    mac_search = self.mac_re.search(single[1])
-                    if mac_search:
-                        mac = mac_search.group(0)
-                interface_list.append({u'interface':interface,
-                                       u'ip':ip,
-                                       u'mac':mac})
-                self.logger.info("Find: %5s|%16s|%s", interface, mac, ip)
-            # interface_set = set(interface_list)
+            for interface in interface_re.finditer(stdout):
+                interfaces_list.append({
+                    u'interface': interface.group(u'interfacename'),
+                    u'mac': interface.group(u'mac'),
+                    u'ip': interface.group(u'ip'),
+                })
+                self.logger.info("Find: %5s|%17s|%s",
+                                 interface.group(u'interfacename'),
+                                 interface.group(u'mac'),
+                                 interface.group(u'ip'))
         self.logger.info("interface_list_get: end")
-        return interface_list
+        return interfaces_list
 
     def interface_mapping(self, source, target, source_content, device=None):
         '''
@@ -759,7 +937,7 @@ class AdbAuto(AdbWrapper):
         Output: False / target_content (str)
         '''
         self.logger.info("interface_mapping: start")
-        self.logger.info("interface_mapping: source_content - {}".format(source_content))
+        self.logger.info("interface_mapping: source_content - %s", source_content)
         assert source in (u'ip', 'interface', 'mac'), u"Invalid source, should be ip/interface/mac"
         assert target in (u'ip', 'interface', 'mac'), u"Invalid target, should be ip/interface/mac"
         interface_list = self.interface_list_get(device=device)
@@ -875,11 +1053,171 @@ class AdbAuto(AdbWrapper):
             self.logger.info("get_process_list: success")
             return set(processes_list)
 
-    def is_partition_status(self):
-        pass
+    def get_partition_status(self, device=None):
+        '''
+        Return mount status from mount command
+        Input: device [SN(for USB device) / IP:Port(for network device)](str) / None(for self._device)]
+        Output: mount_list (set)
+        Mount List = [
+                          {u'device': (str),
+                           u'mount_point': (str),
+                           u'type': (str),
+                           u'options': vsize(int)},
+        ]
+        '''
+        self.logger.info("mount: start")
+        self.root_auto(device)
+        stdout, stderr = self.shell_auto('mount', device=device, timeout=30)
+        mount_l = self.mount_re.findall(stdout)
+        if mount_l:
+            mount_dict_list = []
+            self.logger.info("mount: success")
+            for mount in mount_l:
+                mount_dict_list.append({
+                    u'device': mount[0],
+                    u'mount_point': mount[1],
+                    u'type': mount[2],
+                    u'options': mount[3]
+                })
+            res = mount_dict_list
+        elif u'not found' in stdout:
+            self.logger.info("mount: fail to found")
+            res = False
+        else:
+            self.logger.info("mount: %r", stdout)
+            raise AdbFailException(SHELL_FAILED, stdout, stderr)
+        return res
+
+    def input_keyevent(self, keycode, longpress=False, device=None, timeout=5):
+        '''
+        Use android command: input keyevent
+        Input:  keycode (str/int) See Android Formal Page
+                device [SN(for USB device) / IP:Port(for network device)](str) / None(for self._device)]
+        Output: None
+        '''
+        self.logger.info("input_keyevent: start")
+        if longpress:
+            cmd = 'input keyevent --longpress {}'.format(keycode)
+        else:
+            cmd = 'input keyevent {}'.format(keycode)
+        stdout, stderr = self.shell_auto(cmd, device=device, timeout=timeout)
+        if stdout == u'':
+            self.logger.info("input_keyevent: success")
+        else:
+            self.logger.info("input_keyevent: %s", stdout)
+            raise AdbFailException(SHELL_FAILED, stdout, stderr)
+
+    def input_tap(self, x, y, device=None, timeout=5):
+        '''
+        Use android command: input tap
+        Input:  x/y (int)
+                device [SN(for USB device) / IP:Port(for network device)](str) / None(for self._device)]
+        Output: None
+        '''
+        self.logger.info("input_tap: start")
+        stdout, stderr = self.shell_auto('input tap {} {}'.format(x, y), device=device, timeout=timeout)
+        if stdout == u'':
+            self.logger.info("input_tap: success")
+        else:
+            self.logger.info("input_tap: %s", stdout)
+            raise AdbFailException(SHELL_FAILED, stdout, stderr)
+
+    def input_text(self, text, device=None, timeout=5):
+        '''
+        Use android command: input keyevent
+        Input:  text (str)
+                device [SN(for USB device) / IP:Port(for network device)](str) / None(for self._device)]
+        Output: None
+        '''
+        self.logger.info("input_text: start")
+        stdout, stderr = self.shell_auto('input text {}'.format(text), device=device, timeout=timeout)
+        if stdout == u'':
+            self.logger.info("input_text: success")
+        else:
+            self.logger.info("input_text: %s", stdout)
+            raise AdbFailException(SHELL_FAILED, stdout, stderr)
+
+    def uiautomator_dump(self, device=None, timeout=30):
+        '''
+        Use uiautomarot dump, and return xml content
+        Input: device [SN(for USB device) / IP:Port(for network device)](str) / None(for self._device)]
+        Output: XML_Content(str) for uiautomator dump
+        '''
+        temp_folder = u'/sdcard' # can work on both root/shell
+        self.logger.info("uiautomator_dump: start")
+        _, stderr = self.shell_auto('uiautomator dump {}/uiautomator.xml'.format(temp_folder), device=device, timeout=timeout)
+        stdout, _ = self.shell_auto('cat {}/uiautomator.xml'.format(temp_folder), device=device, timeout=timeout)
+        _, _ = self.shell_auto('rm {}/uiautomator.xml'.format(temp_folder), device=device, timeout=timeout)
+        if stdout.startswith(u"<?"):
+            self.logger.info("uiautomator_dump: success")
+            return stdout
+        elif u'ERROR:' in stderr:
+            self.logger.error("uiautomator_dump %s", stderr)
+            raise AdbFailException(stderr.replace(u'ERROR:', ''), stdout, stderr)
+        else:
+            self.logger.error("uiautomator_dump: %s", stdout)
+            raise AdbFailException(SHELL_FAILED, stdout, stderr)
+
+    def am_start(self, intent, device=None, timeout=30, **options):
+        '''
+        Android Activity Manager controller
+        Input: intent(str), see https://developer.android.com/studio/command-line/adb.html#IntentSpec
+               device [SN(for USB device) / IP:Port(for network device)](str) / None(for self._device)]
+               options:
+                    debugging(bool), enable debugging, default as False
+                    wait(bool), Wait for lanch to complete, default as False
+                    profiler(str), define profiler file path
+                    Profiler(str), define profiler file path, but stop after app goes idle
+                    forcestop(bool), force stop target app before starting the activity, default as False
+                    userid(str), specify which user to run as, default as current
+        Output: stdout(str)
+                stderr(str)
+                result_dict(dict){
+                    error_type(str)
+                    error_message(str)
+                    status(str)
+                    thistime(int)
+                    totaltime(int)
+                    waittime(int)
+                }
+        '''
+        raise NotImplementedError
+
+        '''
+Starting: Intent { act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] pkg=com.arachnoid.sshelper }
+Error: Activity not started, unable to resolve Intent { act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] flg=0x10000000 pkg=com.arachnoid.sshelper }
+
+Starting: Intent { act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] cmp=com.android.tv.settings/.MainActivity }
+Error type 3
+Error: Activity class {com.android.tv.settings/com.android.tv.settings.MainActivity} does not exist.
+
+Starting: Intent { act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] cmp=com.android.tv.settings/.MainSettings }
+
+-W
+Starting: Intent { act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] cmp=com.android.tv.settings/.MainSettings }
+Warning: Activity not started, its current task has been brought to the front
+Status: ok
+Activity: com.android.tv.settings/.MainSettings
+ThisTime: 0
+TotalTime: 0
+WaitTime: 7
+Complete
+
+-S
+Stopping: com.android.tv.settings
+Starting: Intent { act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] cmp=com.android.tv.settings/.MainSettings }
+        '''
+
+    def pm(self, device=None, timeout=30):
+        '''Android Package Manager controller'''
+        raise NotImplementedError
+
+    def sm(self, device=None, timeout=30):
+        '''Android Package Manager controller'''
+        raise NotImplementedError
 
     def usb_mount_exist(self):
-        pass
+        raise NotImplementedError
 
     def ping_status(self):
-        pass
+        raise NotImplementedError

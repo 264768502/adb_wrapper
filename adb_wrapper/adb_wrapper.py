@@ -30,7 +30,7 @@ ADB_SERVER_PORT = 5037  # Default adb server local port
 
 
 class AdbFailException(SubprocessException):
-    def __init__(self, msg, stdout=None, stderr=None):
+    def __init__(self, msg=None, stdout=None, stderr=None):
         super(AdbFailException, self).__init__(msg, stdout, stderr)
         self.msg, self.stdout, self.stderr = msg, stdout, stderr
 
@@ -387,7 +387,7 @@ class AdbWrapper(BaseWrapper):
         devices = self.devices_re.findall(stdout.replace(u'List of devices attached', ''))
         devices_dict = {}
         for device in devices:
-            if re.match(r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:\d{1,5}', device[0]):
+            if re.match(r'[^:]+:\d{1,5}', device[0]):
                 self.logger.info("Find network device: {device} | {status}".format(device=device[0], status=device[1]))
             else:
                 self.logger.info("Find   usb   device: {device} | {status}".format(device=device[0], status=device[1]))
@@ -421,23 +421,23 @@ class AdbWrapper(BaseWrapper):
             devicename = device_pattern.search(stdout).group(1).rstrip()
             self.logger.warning("connect: already connected {device}".format(device=devicename))
             self.logger.warning("Sometimes, this status may be fake, it's better to check with shell exit")
-        elif u'unable to connect to' in stdout:
-            self.logger.error("connect: fail")
-            raise AdbConnectFail("Connect Fail", stdout, stderr)
         elif u'connected to ' in stdout:
             devicename = device_pattern.search(stdout).group(1).rstrip()
             self.logger.info("connect: success - {device}".format(device=devicename))
-        elif u'empty host name' in stdout:
-            self.logger.error("connect: empty host name")
-            if re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:%d$' % ADBIP_PORT, device):
+        elif u'empty host name' in stdout or u'Name or service not known' in stdout:
+            self.logger.error("connect: empty host name/Name or service not known")
+            if u':' in device:
                 self.logger.info("Try adb connect again without default port %d" % ADBIP_PORT)
-                ip = re.search(r'^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}):%d$' % ADBIP_PORT, device).group(1)
+                ip = device.split(u':')[0]
                 return self.connect(ip)
-            raise AdbConnectFail("Connect empty host name", stdout, stderr)
+            raise AdbConnectFail("Connect empty host name/Name or service not known", stdout, stderr)
         elif u'error: ' in stderr:
             error = self.adb_error_re.search(stderr).group(1)
             self.logger.error("connect: error. %s", error)
             raise AdbFailException(error, stdout, stderr)
+        elif u'unable to connect to' in stdout:
+            self.logger.error("connect: fail")
+            raise AdbConnectFail("Connect Fail", stdout, stderr)
         else:
             self.logger.error("connect: fail with unknown reason")
             self.logger.error("stdout: {!r}".format(stdout))
@@ -544,7 +544,7 @@ class AdbWrapper(BaseWrapper):
                 raise AdbTimeout(err.msg, err.stdout, err.stderr)
             else:
                 raise
-        if u'Permission denied' in stderr:
+        if u'Permission denied' in stderr or u'Permission denied' in stdout:
             self.logger.error("push: Permission denied")
             raise AdbFailException(PERMISSION_DENY, stdout, stderr)
         elif u'Read-only file system' in stderr:
@@ -563,7 +563,8 @@ class AdbWrapper(BaseWrapper):
             error = self.adb_error_re.search(stderr).group(1)
             self.logger.error("push: error. %s", error)
             raise AdbFailException(error, stdout, stderr)
-        elif u'bytes in' in stderr or u'0 files skipped' in stderr:
+        elif u'bytes in' in stderr or u'0 files skipped' in stderr or \
+            u'bytes in' in stdout or u'0 files skipped' in stdout:
             self.logger.info("push: success")
         else:
             self.logger.error("push: fail with unknown reason")
@@ -593,7 +594,7 @@ class AdbWrapper(BaseWrapper):
                 raise AdbTimeout(err.msg, err.stdout, err.stderr)
             else:
                 raise
-        if u'Permission denied' in stderr:
+        if u'Permission denied' in stderr or u'Permission denied' in stdout:
             self.logger.error("pull: Permission denied")
             raise AdbFailException(PERMISSION_DENY, stdout, stderr)
         elif u'error: ' in stderr:
@@ -607,7 +608,7 @@ class AdbWrapper(BaseWrapper):
         elif u'0 files pulled' in stderr:
             self.logger.warning("pull: 0 files pulled")
             return None
-        elif u'bytes in' in stderr or u'0 files skipped' in stderr:
+        elif u'bytes in' in stderr or u'bytes in' in stdout  or u'0 files skipped' in stderr:
             self.logger.info("pull: success")
         else:
             self.logger.error("pull: fail with unknown reason")
@@ -834,7 +835,7 @@ class AdbWrapper(BaseWrapper):
             if err.msg == TIMEOUT:
                 raise AdbTimeout(err.msg, err.stdout, err.stderr)
             else:
-                raise
+                raise AdbFailException(err.msg, err.stdout, err.stderr)
         if u'error: ' in stderr:
             error = self.adb_error_re.search(stderr).group(1)
             self.logger.error("reboot: error. %s", error)
@@ -938,7 +939,7 @@ class AdbWrapper(BaseWrapper):
             error = self.adb_error_re.search(stderr).group(1)
             self.logger.error("install: error. %s", error)
             raise AdbFailException(error, stdout, stderr)
-        elif u'Success' in stdout:
+        elif u'Success' in stdout or u'Success' in stderr:
             self.logger.info("install: success")
         else:
             self.logger.error("install: fail with unknown reason")
