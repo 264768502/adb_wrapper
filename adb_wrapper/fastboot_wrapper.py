@@ -232,7 +232,8 @@ class FastbootWrapper(BaseWrapper):
             cmdlist.append(target)
         _timeout = timeout if timeout else self._common_fastboot_timeout
         stdout, stderr = self._run_fb_cmd(cmdlist, _timeout)
-        if u'rebooting' in stderr and u'finished' in stderr:
+        std = stdout + stderr
+        if u'rebooting' in std.lower() and u'finished' in std.lower():
             self.logger.info("reboot: success")
         else:
             self.logger.error("reboot unknown error")

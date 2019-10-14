@@ -25,7 +25,7 @@ THIRDADB = ('tadb.exe', 'ShuameDaemon.exe', 'shuame_helper.exe',
             'wpscloudlaunch.exe', 'AndroidServer.exe', 'Alipaybsm.exe',
             'TaobaoProtect.exe', 'wpscenter.exe', 'wpscloudsvr.exe')
 ADBGAP = 0.25  # Default blocking command check gap for command terminate
-ADBIP_PORT = 5555  # Default adb network device port, should keep align with adb
+ADBIP_PORT = int(os.getenv('ADBPORT', '5555'))  # Default adb network device port, should keep align with adb
 ADB_SERVER_PORT = 5037  # Default adb server local port
 
 
@@ -143,11 +143,13 @@ class AdbLogcat(object):
         close()
         filename()
     '''
-    def __init__(self, process, filehandler, logger):
+    def __init__(self, process, filename, logger):
         self.logger = logger
         self.p = process
-        self.h = filehandler
-        self.logger.info("Adblogcat({}): start".format(self.h.name))
+        self.name = filename
+        if self.p.stderr:
+            self.p.stderr.close()
+        self.logger.info("Adblogcat({}): start".format(self.name))
 
     def __del__(self):
         self.close()
@@ -157,7 +159,7 @@ class AdbLogcat(object):
         adb shell/logcat subprocess status
         Output: True/False
         '''
-        self.logger.info("Adblogcat({}): isalive".format(self.h.name))
+        self.logger.info("Adblogcat({}): isalive".format(self.name))
         self.p.poll()
         if self.p.returncode is None:
             return True
@@ -170,7 +172,7 @@ class AdbLogcat(object):
         Input: timeout (int/float/None[infinite])
         Output: True [Process exist] / False [Timeout]
         '''
-        self.logger.info("Adblogcat({}): join".format(self.h.name))
+        self.logger.info("Adblogcat({}): join".format(self.name))
         self.p.poll()
         start_time = time.time()
         if timeout is None:
@@ -183,18 +185,19 @@ class AdbLogcat(object):
         return not self.isalive()
 
     def filename(self):
-        return self.h.name
+        return self.name
 
     def close(self):
-        self.logger.info("Adblogcat({}): close".format(self.h.name))
+        self.logger.info("Adblogcat({}): close".format(self.name))
         self.p.poll()
         if self.p.returncode is None:
             with ignored(OSError):
-                self.logger.info("Adblogcat({}): kill adb process".format(self.h.name))
+                self.logger.info("Adblogcat({}): kill adb process".format(self.name))
                 self.p.kill()
             self.p.wait()
-            self.logger.debug("Adblogcat({}): adb logcat close".format(self.h.name))
-        self.h.close()
+            self.logger.debug("Adblogcat({}): adb logcat close".format(self.name))
+        if self.p.stdout:
+            self.p.stdout.close()
 
 
 class AdbWrapper(BaseWrapper):
@@ -431,6 +434,8 @@ class AdbWrapper(BaseWrapper):
                 ip = device.split(u':')[0]
                 return self.connect(ip)
             raise AdbConnectFail("Connect empty host name/Name or service not known", stdout, stderr)
+        elif u'missing port in specification' in stdout:
+            return self.connect(device+u':'+str(ADBIP_PORT))
         elif u'error: ' in stderr:
             error = self.adb_error_re.search(stderr).group(1)
             self.logger.error("connect: error. %s", error)
@@ -607,7 +612,7 @@ class AdbWrapper(BaseWrapper):
             raise AdbFailException(NOFILEORFOLDER, stdout, stderr)
         elif u'0 files pulled' in stderr:
             self.logger.warning("pull: 0 files pulled")
-            return None
+            return []
         elif u'bytes in' in stderr or u'bytes in' in stdout  or u'0 files skipped' in stderr:
             self.logger.info("pull: success")
         else:
@@ -857,9 +862,9 @@ class AdbWrapper(BaseWrapper):
         self.logger.info("shell(unblock): start")
         self.logger.info("shell: target - %s", device)
         if IS_PY2:
-            cmdlist = ['-s', device, 'shell'] + ['"{}"'.format(_to_utf8(cmd))]
+            cmdlist = ['-s', device, 'shell'] + ['{}'.format(_to_utf8(cmd))]
         else:
-            cmdlist = ['-s', device, 'shell'] + ['"{}"'.format(_to_unicode(cmd))]
+            cmdlist = ['-s', device, 'shell'] + ['{}'.format(_to_unicode(cmd))]
         res = self._adbcommand_unblocking(cmdlist)
         if res[0] != True:
             return res
@@ -1136,7 +1141,7 @@ class AdbWrapper(BaseWrapper):
             filehandler.close()
             return res
         else:
-            return True, AdbLogcat(res[1], filehandler, self.logger)
+            return True, AdbLogcat(res[1], filename, self.logger)
 
     @_device_checkor
     def shell2file(self, filename, cmd, device=None):
@@ -1162,7 +1167,7 @@ class AdbWrapper(BaseWrapper):
             filehandler.close()
             return res
         else:
-            return True, AdbLogcat(res[1], filehandler, self.logger)
+            return True, AdbLogcat(res[1], filename, self.logger)
 
 # TODO: Different Server Port support with -P
 # TODO: new adb wait-for[-<transport>]-<state>

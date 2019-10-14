@@ -49,9 +49,6 @@ class AdbAuto(AdbWrapper):
         Use adb shell exit to check real connection status
         Input: device [SN(for USB device) / IP:Port(for network device)](str) / None(for self._device)]
         Output: Result [Connection True(True)/Other Status(False)](bool)
-                Reason [For Result==False](str)
-                stdout[from adb command](str)
-                stderr(str)
         '''
         self.logger.info("check_connection: start")
         try:
@@ -113,7 +110,7 @@ class AdbAuto(AdbWrapper):
         # Device not in Devices List or Connection status False, try do adb connect
         for num in range(retry_times):
             try:
-                device_name = self.connect(device)
+                device_name = self.connect(_device)
                 self.logger.info("connect_auto: connect success")
                 if self.check_connection(device=device_name):
                     self.logger.info("connect_auto: check connect Pass")
@@ -678,13 +675,13 @@ class AdbAuto(AdbWrapper):
         '''
         self.logger.info("file_property: start")
         self.root_auto(device)
+        file_property_re = self.file_property_nose_re
         try:
             if self.android_sdk_version_get(device=device) > 22:
                 cmd = u'ls -alZ \'{}\''.format(filepath)
                 file_property_re = self.file_property_se_re
             else:
                 cmd = u'ls -al \'{}\''.format(filepath)
-                file_property_re = self.file_property_nose_re
         except AdbFailException:
             cmd = u'ls -al \'{}\''.format(filepath)
         stdout, stderr = self.shell_auto(cmd=cmd, device=device, timeout=5)
